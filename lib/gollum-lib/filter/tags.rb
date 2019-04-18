@@ -6,23 +6,23 @@ class Gollum::Filter::Tags < Gollum::Filter
   def extract(data)
     return data if @markup.format == :txt || @markup.format == :asciidoc
     data.gsub!(/(.?)\[\[(.+?)\]\]([^\[]?)/m) do
-      if $1 == "'" && $3 != "'"
-        "[[#{$2}]]#{$3}"
-      elsif $2.include?('][')
-        if $2[0..4] == 'file:'
-          pre            = $1
-          post           = $3
-          parts          = $2.split('][')
+      if Regexp.last_match[1] == "'" && Regexp.last_match[3] != "'"
+        "[[#{Regexp.last_match[2]}]]#{Regexp.last_match[3]}"
+      elsif Regexp.last_match[2].include?('][')
+        if Regexp.last_match[2][0..4] == 'file:'
+          pre            = Regexp.last_match[1]
+          post           = Regexp.last_match[3]
+          parts          = Regexp.last_match[2].split('][')
           parts[0][0..4] = ""
           link           = "#{parts[1]}|#{parts[0].sub(/\.org/, '')}"
           id             = register_tag(link)
           "#{pre}#{id}#{post}"
         else
-          $&
+          Regexp.last_match[0]
         end
       else
-        id = register_tag($2)
-        "#{$1}#{id}#{$3}"
+        id = register_tag(Regexp.last_match[2])
+        "#{Regexp.last_match[1]}#{id}#{Regexp.last_match[3]}"
       end
     end
     data
@@ -42,7 +42,7 @@ class Gollum::Filter::Tags < Gollum::Filter
       if node.text? then
         content = node.content
         content.gsub!(/TAG[a-f0-9]+TAG/) do |id|
-          if tag = @map[id] then
+          if (tag = @map[id]) then
             if is_preformatted?(node) then
               "[[#{tag}]]"
             else
@@ -73,17 +73,17 @@ class Gollum::Filter::Tags < Gollum::Filter
   #
   # Returns the String HTML version of the tag.
   def process_tag(tag)
-    if tag =~ /^_TOC_$/
+    if tag =~ /^_TOC_/
       %{[[#{tag}]]}
     elsif tag =~ /^_$/
       %{<div class="clearfloats"></div>}
-    elsif html = process_include_tag(tag)
+    elsif (html = process_include_tag(tag))
       html
-    elsif html = process_image_tag(tag)
+    elsif (html = process_image_tag(tag))
       html
-    elsif html = process_external_link_tag(tag)
+    elsif (html = process_external_link_tag(tag))
       html
-    elsif html = process_file_link_tag(tag)
+    elsif (html = process_file_link_tag(tag))
       html
     else
       process_page_link_tag(tag)
@@ -125,11 +125,15 @@ class Gollum::Filter::Tags < Gollum::Filter
     return if parts.size.zero?
 
     name = parts[0].strip
-    path = if file = @markup.find_file(name)
-             ::File.join @markup.wiki.base_path, file.path
-           elsif name =~ /^https?:\/\/.+(jpg|png|gif|svg|bmp)$/i
-             name
-           end
+    if (file = @markup.find_file(name))
+      path = ::File.join @markup.wiki.base_path, file.path
+    elsif name =~ /^https?:\/\/.+(jpg|png|gif|svg|bmp)$/i
+      path = name
+    elsif name =~ /.+(jpg|png|gif|svg|bmp)$/i
+      # If is image, file not found and no link, then populate with empty String
+      # We can than add an image not found alt attribute for this later
+      path = ""
+    end
 
     if path
       opts = parse_image_tag_options(tag)
@@ -155,20 +159,22 @@ class Gollum::Filter::Tags < Gollum::Filter
         end
       end
 
-      if width = opts['width']
+      if (width = opts['width'])
         if width =~ /^\d+(\.\d+)?(em|px)$/
           attrs << %{width="#{width}"}
         end
       end
 
-      if height = opts['height']
+      if (height = opts['height'])
         if height =~ /^\d+(\.\d+)?(em|px)$/
           attrs << %{height="#{height}"}
         end
       end
 
-      if alt = opts['alt']
+      if path != "" && (alt = opts['alt'])
         attrs << %{alt="#{alt}"}
+      elsif path == ""
+        attrs << %{alt="Image not found"}
       end
 
       attr_string = attrs.size > 0 ? attrs.join(' ') + ' ' : ''
@@ -207,11 +213,12 @@ class Gollum::Filter::Tags < Gollum::Filter
   # nil if it is not.
   def process_external_link_tag(tag)
     parts = tag.split('|')
+    parts.reverse! if @markup.reverse_links?
     return if parts.size.zero?
     if parts.size == 1
       url = parts[0].strip
     else
-      name, url = *parts.compact.map(&:strip)      
+      name, url = *parts.compact.map(&:strip)
     end
     accepted_protocols = @markup.wiki.sanitization.protocols['a']['href'].dup
     if accepted_protocols.include?(:relative)
@@ -229,7 +236,7 @@ class Gollum::Filter::Tags < Gollum::Filter
     else
       nil
     end
-    
+
   end
 
   # Attempt to process the tag as a file link tag.
@@ -245,11 +252,11 @@ class Gollum::Filter::Tags < Gollum::Filter
 
     name = parts[0].strip
     path = parts[1] && parts[1].strip
-    path = if path && file = @markup.find_file(path)
-             ::File.join @markup.wiki.base_path, file.path
-           else
-             nil
-           end
+    if path && file = @markup.find_file(path)
+      path = ::File.join @markup.wiki.base_path, file.path
+    else
+      path = nil
+    end
 
     if name && path && file
       %{<a href="#{::File.join @markup.wiki.base_path, file.path}">#{name}</a>}
@@ -269,7 +276,7 @@ class Gollum::Filter::Tags < Gollum::Filter
   #   if it is not.
   def process_page_link_tag(tag)
     parts = tag.split('|')
-    parts.reverse! if @markup.format == :mediawiki
+    parts.reverse! if @markup.reverse_links?
 
     name, page_name = *parts.compact.map(&:strip)
     cname           = @markup.wiki.page_class.cname(page_name || name)
@@ -313,7 +320,7 @@ class Gollum::Filter::Tags < Gollum::Filter
     if page
       return page
     end
-    if pos = cname.index('#')
+    if (pos = cname.index('#'))
       [@markup.wiki.page(cname[0...pos]), cname[pos..-1]]
     end
   end

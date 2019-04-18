@@ -24,6 +24,10 @@ context "Page" do
     assert_equal 'Bilbo-Baggins.md', page.path
     assert_equal :markdown, page.format
     assert_equal @wiki.repo.commits.first.id, page.version.id
+
+    assert_not_nil page.last_version
+    assert_equal page.versions.first.id, page.last_version.id
+    assert page.last_version.stats.files.map{|file| file_path = file.first}.include? page.path
   end
 
   test "get existing page case insensitive" do
@@ -252,6 +256,8 @@ context "within a sub-directory" do
   test "should inherit header/footer/sidebar pages from parent directories" do
     page = @wiki.page('Elrond')
 
+    assert page.sidebar.parent_page == page
+
     assert_equal Gollum::Page, page.sidebar.class
     assert_equal Gollum::Page, page.header.class
     assert_equal Gollum::Page, page.footer.class
@@ -271,7 +277,7 @@ end
 
 context "with custom markup engines" do
   setup do
-    Gollum::Markup.register(:redacted, "Redacted", :regexp => /rd/) { |content| content.gsub /\S/, '-' }
+    Gollum::Markup.register(:redacted, "Redacted", :regexp => /rd/) { |content| content.gsub(/\S/, '-') }
     @wiki = Gollum::Wiki.new(testpath("examples/lotr.git"))
   end
 

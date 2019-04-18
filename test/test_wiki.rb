@@ -35,42 +35,42 @@ context "Wiki" do
 
   test "shows paginated log with no page" do
     Gollum::Wiki.per_page = 3
-    commits               = @wiki.repo.commits[0..2].map { |x| x.id }
+    commits               = @wiki.repo.commits[0..2].map(&:id)
     assert_equal commits, @wiki.log.map { |c| c.id }
   end
 
   test "shows paginated log with 1st page" do
     Gollum::Wiki.per_page = 3
-    commits               = @wiki.repo.commits[0..2].map { |x| x.id }
-    assert_equal commits, @wiki.log(:page => 1).map { |c| c.id }
+    commits               = @wiki.repo.commits[0..2].map(&:id)
+    assert_equal commits, @wiki.log(:page => 1).map(&:id)
   end
 
   test "shows paginated log with next page" do
     Gollum::Wiki.per_page = 3
-    commits               = @wiki.repo.commits[3..5].map { |x| x.id }
-    assert_equal commits, @wiki.log(:page => 2).map { |c| c.id }
+    commits               = @wiki.repo.commits[3..5].map(&:id)
+    assert_equal commits, @wiki.log(:page => 2).map(&:id)
   end
 
   test "list pages" do
     pages = @wiki.pages
     assert_equal \
-      ['Bilbo-Baggins.md', 'Boromir.md', 'Elrond.md', 'Eye-Of-Sauron.md', 'Hobbit.md', 'Home.textile', 'My-Precious.md', 'Samwise Gamgee.mediawiki', 'todo.txt'],
-      pages.map { |p| p.filename }.sort
+      ['Bilbo-Baggins.md', 'Boromir.md', 'Elrond.md', 'Eye-Of-Sauron.md', 'Hobbit.md', 'Home.textile', 'My-Precious.md', 'RingBearers.md', 'Samwise Gamgee.mediawiki', 'todo.txt'],
+      pages.map(&:filename).sort
   end
 
   test "list files" do
     files = @wiki.files
     assert_equal \
       ['Data-Two.csv', 'Data.csv', 'Riddles.rd', 'eye.jpg'],
-      files.map { |p| p.filename }.sort
+      files.map(&:filename).sort
   end
 
   test "counts pages" do
-    assert_equal 9, @wiki.size
+    assert_equal 10, @wiki.size
   end
 
   test "latest changes in repo" do
-    assert_equal @wiki.latest_changes({:max_count => 1}).first.id, "874f597a5659b4c3b153674ea04e406ff393975e"
+    assert_equal @wiki.latest_changes({:max_count => 1}).first.id, "a3e857e03ecc69a99f1dd72dc3f7e0c47602a05a"
   end
   
   test "text_data" do
@@ -130,6 +130,10 @@ context "Wiki page previewing" do
     assert_html_equal "<h1><a class=\"anchor\" id=\"bilbo\" href=\"#bilbo\"><i class=\"fa fa-link\"></i></a>Bilbo</h1>", page.formatted_data
     assert_equal "Test.md", page.filename
     assert_equal "Test", page.name
+
+    assert_equal @wiki.repo.commit(@wiki.ref).id, page.version.id
+    assert_nil page.last_version
+    assert page.versions.empty?
   end
 end
 
@@ -140,11 +144,86 @@ context "Wiki TOC" do
     @wiki   = Gollum::Wiki.new(@path, options)
   end
 
+  test "empty TOC" do
+    page = @wiki.preview_page("Test", "[[_TOC_]] [[_TOC_|levels = 2]] Bilbo", :markdown)
+    assert_html_equal "<p>Bilbo</p>", page.formatted_data
+    assert_empty page.toc_data
+  end
+
   test "toc_generation" do
     page = @wiki.preview_page("Test", "# Bilbo", :markdown)
     assert_equal "# Bilbo", page.raw_data
     assert_html_equal "<h1><a class=\"anchor\" id=\"bilbo\" href=\"#bilbo\"><i class=\"fa fa-link\"></i></a>Bilbo</h1>", page.formatted_data
     assert_html_equal %{<div class="toc"><div class="toc-title">Table of Contents</div><ul><li><a href="#bilbo">Bilbo</a></li></ul></div>}, page.toc_data
+  end
+
+  test "TOC with levels" do
+    content = <<-MARKDOWN
+# Ecthelion
+
+## Denethor
+
+### Boromir
+
+### Faramir
+    MARKDOWN
+
+    formatted = <<-HTML
+<h1><a class="anchor" id="ecthelion" href="#ecthelion"><i class="fa fa-link"></i></a>Ecthelion</h1>
+<h2><a class="anchor" id="ecthelion_denethor" href="#ecthelion_denethor"><i class="fa fa-link"></i></a>Denethor</h2>
+<h3><a class="anchor" id="ecthelion_denethor_boromir" href="#ecthelion_denethor_boromir"><i class="fa fa-link"></i></a>Boromir</h3>
+<h3><a class="anchor" id="ecthelion_denethor_faramir" href="#ecthelion_denethor_faramir"><i class="fa fa-link"></i></a>Faramir</h3>
+    HTML
+
+    page_level0 = @wiki.preview_page("Test", "[[_TOC_ | levels=0]] \n\n" + content, :markdown)
+    toc_formatted_level0 = <<-HTML
+<p><div class="toc"><div class="toc-title">Table of Contents</div></div></p>
+    HTML
+    assert_html_equal toc_formatted_level0 + formatted, page_level0.formatted_data
+
+    page_level1 = @wiki.preview_page("Test", "[[_TOC_ | levels=1]] \n\n" + content, :markdown)
+    toc_formatted_level1 = <<-HTML
+<p><div class="toc">
+<div class="toc-title">Table of Contents</div>
+<ul><li><a href="#ecthelion">Ecthelion</a></li></ul>
+</div></p>
+    HTML
+    assert_html_equal toc_formatted_level1 + formatted, page_level1.formatted_data
+
+    page_level2 = @wiki.preview_page("Test", "[[_TOC_ |levels = 2]] \n\n" + content, :markdown)
+    toc_formatted_level2 = <<-HTML
+<p><div class="toc">
+<div class="toc-title">Table of Contents</div>
+<ul><li><a href="#ecthelion">Ecthelion</a>
+<ul><li><a href="#ecthelion_denethor">Denethor</a></li></ul>
+</li></ul>
+</div></p>
+    HTML
+    assert_html_equal toc_formatted_level2 + formatted, page_level2.formatted_data
+
+    page_level3 = @wiki.preview_page("Test", "[[_TOC_ |levels = 3]] \n\n" + content, :markdown)
+    page_level4 = @wiki.preview_page("Test", "[[_TOC_ |levels = 4]] \n\n" + content, :markdown)
+    page_fulltoc = @wiki.preview_page("Test", "[[_TOC_]] \n\n" + content, :markdown)
+    toc_formatted_full = <<-HTML
+<p><div class="toc">
+<div class="toc-title">Table of Contents</div>
+<ul>
+  <li>
+    <a href="#ecthelion">Ecthelion</a>
+    <ul>
+      <li><a href="#ecthelion_denethor">Denethor</a>
+    <ul>
+      <li><a href="#ecthelion_denethor_boromir">Boromir</a></li>
+      <li><a href="#ecthelion_denethor_faramir">Faramir</a></li>
+    </ul>
+  </li></ul>
+</li></ul>
+</div></p>
+    HTML
+    assert_html_equal toc_formatted_full + formatted, page_level3.formatted_data
+    assert_html_equal toc_formatted_full + formatted, page_level3.formatted_data
+    assert_html_equal toc_formatted_full + formatted, page_fulltoc.formatted_data
+
   end
 
   # Ensure ' creates valid links in TOC
@@ -179,7 +258,7 @@ context "Wiki TOC in _Sidebar.md" do
   end
   
   teardown do
-    FileUtils.rm_r(File.join(File.dirname(__FILE__), *%w[examples test.git]))
+    FileUtils.rm_r(File.join(File.dirname(__FILE__), *%w(examples test.git)))
   end
 end
 
@@ -348,7 +427,7 @@ context "Wiki page writing" do
   end
 
   teardown do
-    FileUtils.rm_r(File.join(File.dirname(__FILE__), *%w[examples test.git]))
+    FileUtils.rm_r(File.join(File.dirname(__FILE__), *%w(examples test.git)))
   end
 end
 
@@ -358,20 +437,33 @@ context "Wiki search" do
     FileUtils.rm_rf(@path)
     Gollum::Git::Repo.init_bare(@path)
     @wiki = Class.new(Gollum::Wiki).new(@path)
+    @wiki.write_page("bar", :markdown, "bar", commit_details)
+    @wiki.write_page("filename:with:colons", :markdown, "# Filename with colons", commit_details)
+    @wiki.write_page("foo", :markdown, "# File with query in contents and filename\nfoo", commit_details)
   end
   
   test "search results should be able to return a filename with an embedded colon" do
-    details = commit_details
-    @wiki.write_page("filename:with:colons", :markdown, "# Filename with colons", details)
-    page = @wiki.page("filename:with:colons")
     results = @wiki.search("colons")
     assert_not_nil results
     assert_equal "filename:with:colons", results.first[:name]
     assert_equal 2, results.first[:count]
   end
+
+  test "search results should make the content/filename search additive" do
+    # There is a file that contains the word 'foo' and is called 'foo', so it should
+    # have a count of 2, not 1...
+    results = @wiki.search("foo")
+    assert_equal 2, results.first[:count]
+  end
+
+  test "search results should not include files that do not match the query" do
+    results = @wiki.search("foo")
+    assert_equal 1, results.size
+    assert_equal "foo", results.first[:name]
+  end
   
   teardown do
-    FileUtils.rm_r(File.join(File.dirname(__FILE__), *%w[examples test.git]))
+    FileUtils.rm_r(File.join(File.dirname(__FILE__), *%w(examples test.git)))
   end
 end
 
@@ -539,7 +631,6 @@ end
 context "page_file_dir option" do
   setup do
     @path          = cloned_testpath('examples/page_file_dir')
-    @repo          = Gollum::Git::Repo.init(@path)
     @page_file_dir = 'docs'
     @wiki          = Gollum::Wiki.new(@path, :page_file_dir => @page_file_dir)
   end
@@ -569,13 +660,6 @@ context "page_file_dir option" do
     assert_equal "docs/foo", results[0][:name]
   end
 
-  test "search results should make the content/filename search additive" do
-    # This file contains the word 'foo' and is called 'foo', so it should
-    # have a count of 2, not 1...
-    results = @wiki.search("foo")
-    assert_equal 2, results[0][:count]
-  end
-
   teardown do
     FileUtils.rm_r(@path)
   end
@@ -603,8 +687,6 @@ context "Wiki page writing with different branch" do
   end
 
   test "write_page" do
-    cd = commit_details
-
     @branch.write_page("Bilbo", :markdown, "# Bilbo", commit_details)
     assert @branch.page("Bilbo")
     assert @wiki.page("Gollum")
@@ -744,7 +826,7 @@ context "Renames directory traversal" do
     source = @wiki.paged("H", "G")
 
     # G/H.md => G/K/F.md
-    assert k = @wiki.rename_page(source, "K/F", rename_commit_details)
+    assert @wiki.rename_page(source, "K/F", rename_commit_details)
 
     new_page = @wiki.paged("F", "K")
     assert_not_nil new_page
@@ -756,7 +838,7 @@ context "Renames directory traversal" do
     source = @wiki.paged("H", "G")
 
     # G/H.md => G/K L/F.md
-    assert k = @wiki.rename_page(source, "K L/F", rename_commit_details)
+    assert @wiki.rename_page(source, "K L/F", rename_commit_details)
 
     new_page = @wiki.paged("F", "K L")
     assert_not_nil new_page
@@ -864,6 +946,6 @@ context "Wiki subclassing" do
   end
 
   teardown do
-    FileUtils.rm_r(File.join(File.dirname(__FILE__), *%w[examples test.git]))
+    FileUtils.rm_r(File.join(File.dirname(__FILE__), *%w(examples test.git)))
   end
 end
