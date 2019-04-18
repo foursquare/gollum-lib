@@ -4,9 +4,7 @@ module Gollum
     include Pagination
 
     Wiki.page_class = self
-    
-    SUBPAGENAMES = [:header, :footer, :sidebar]
-    
+
     # Sets a Boolean determing whether this page is a historical version.
     #
     # Returns nothing.
@@ -25,7 +23,7 @@ module Gollum
     # Returns e.g. ["Home", :markdown], or [] if the extension is unregistered
     def self.parse_filename(filename)
       return [] unless filename =~ /^(.+)\.([a-zA-Z]\w*)$/i
-      pref, ext = Regexp.last_match[1], Regexp.last_match[2]
+      pref, ext = $1, $2
 
       Gollum::Markup.formats.each_pair do |name, format|
         return [pref, name] if ext =~ format[:regexp]
@@ -87,7 +85,7 @@ module Gollum
     # Returns a newly initialized Gollum::Page.
     def initialize(wiki)
       @wiki           = wiki
-      @blob           = nil
+      @blob           = @header = @footer = @sidebar = nil
       @formatted_data = nil
       @doc            = nil
       @parent_page    = nil
@@ -238,7 +236,7 @@ module Gollum
     # formatted_data - page already marked up in html.
     #
     # Returns the String data.
-    def toc_data
+    def toc_data()
       return @parent_page.toc_data if @parent_page and @sub_page
       formatted_data if markup_class.toc == nil
       markup_class.toc
@@ -247,7 +245,7 @@ module Gollum
     # Public: Embedded metadata.
     #
     # Returns Hash of metadata.
-    def metadata
+    def metadata()
       formatted_data if markup_class.metadata == nil
       markup_class.metadata
     end
@@ -283,14 +281,6 @@ module Gollum
       @wiki.repo.git.versions_for_path(@path, @wiki.ref, log_pagination_options(options))
     end
 
-    # Public: The last version that has touched the Page. Can be nil.
-    #
-    # Returns Gollum::Git::Commit, or nil.
-    def last_version
-      return @last_version if defined? @last_version
-      @last_version = @wiki.repo.git.versions_for_path(@path, @wiki.ref, {:max_count => 1}).first
-    end
-
     # Public: The first 7 characters of the current version.
     #
     # Returns the first 7 characters of the current version.
@@ -302,24 +292,21 @@ module Gollum
     #
     # Returns the header Page or nil if none exists.
     def header
-      find_sub_pages unless defined?(@header)
-      @header
+      @header ||= find_sub_page(:header)
     end
 
     # Public: The footer Page.
     #
     # Returns the footer Page or nil if none exists.
     def footer
-      find_sub_pages unless defined?(@footer)
-      @footer
+      @footer ||= find_sub_page(:footer)
     end
 
     # Public: The sidebar Page.
     #
     # Returns the sidebar Page or nil if none exists.
     def sidebar
-      find_sub_pages unless defined?(@sidebar)
-      @sidebar
+      @sidebar ||= find_sub_page(:sidebar)
     end
 
     # Gets a Boolean determining whether this page is a historical version.
@@ -354,7 +341,7 @@ module Gollum
     # Returns the String canonical name.
     def self.cname(name, char_white_sub = '-', char_other_sub = '-')
       name.respond_to?(:gsub) ?
-          name.gsub(%r(\s), char_white_sub).gsub(%r([<>+]), char_other_sub) :
+          name.gsub(%r{\s}, char_white_sub).gsub(%r{[<>+]}, char_other_sub) :
           ''
     end
 
@@ -391,7 +378,7 @@ module Gollum
     # Returns a Gollum::Page or nil if the page could not be found.
     def find(name, version, dir = nil, exact = false)
       map = @wiki.tree_map_for(version.to_s)
-      if (page = find_page_in_tree(map, name, dir, exact))
+      if page = find_page_in_tree(map, name, dir, exact)
         page.version    = version.is_a?(Gollum::Git::Commit) ?
             version : @wiki.commit_for(version)
         page.historical = page.version.to_s == version.to_s
@@ -444,7 +431,7 @@ module Gollum
     #
     # Returns the String path.
     def tree_path(treemap, tree)
-      if (ptree = treemap[tree])
+      if ptree = treemap[tree]
         tree_path(treemap, ptree) + '/' + tree.name
       else
         ''
@@ -458,7 +445,7 @@ module Gollum
     #
     # Returns a Boolean.
     def page_match(name, path)
-      if (match = self.class.valid_filename?(path))
+      if match = self.class.valid_filename?(path)
         @wiki.ws_subs.each do |sub|
           return true if Page.cname(name).downcase == Page.cname(match, sub).downcase
         end
@@ -466,49 +453,39 @@ module Gollum
       false
     end
 
-
-    # Loads sub pages. Sub page names (footers, headers, sidebars) are prefixed with
+    # Loads a sub page.  Sub page names (footers, headers, sidebars) are prefixed with
     # an underscore to distinguish them from other Pages. If there is not one within
     # the current directory, starts walking up the directory tree to try and find one
     # within parent directories.
-    def find_sub_pages(subpagenames = SUBPAGENAMES, map = nil)
-      subpagenames.each{|subpagename| instance_variable_set("@#{subpagename}", nil)}
-      return nil if self.filename =~ /^_/ || ! self.version
-      
-      map ||= @wiki.tree_map_for(@wiki.ref, true)
-      valid_names = subpagenames.map(&:capitalize).join("|")
-      # From Ruby 2.2 onwards map.select! could be used
-      map = map.select{|entry| entry.name =~ /^_(#{valid_names})/ }
-      return if map.empty?
+    #
+    # name - String page name.
+    #
+    # Returns the Page or nil if none exists.
+    def find_sub_page(name)
+      return nil unless self.version
+      return nil if self.filename =~ /^_/
+      name = "_#{name.to_s.capitalize}"
+      return nil if page_match(name, self.filename)
 
-      subpagenames.each do |subpagename|
-        dir = ::Pathname.new(self.path)
-        while dir = dir.parent do
-          subpageblob = map.find do |blob_entry|
-
-            filename = "_#{subpagename.to_s.capitalize}"
-            searchpath = dir == Pathname.new('.') ? Pathname.new(filename) : dir + filename
-            entrypath = ::Pathname.new(blob_entry.path)
-            # Ignore extentions
-            entrypath = entrypath.dirname + entrypath.basename(entrypath.extname)      
-            entrypath == searchpath
-          end
-          
-          if subpageblob
-            subpage =  subpageblob.page(@wiki, @version)
-            subpage.parent_page = self
-            instance_variable_set("@#{subpagename}", subpage)
-            break
-          end
-
-          break if dir == Pathname.new('.')
+      dirs = self.path.split('/')
+      dirs.pop
+      map = @wiki.tree_map_for(@wiki.ref, true)
+      while !dirs.empty?
+        if page = find_page_in_tree(map, name, dirs.join('/'))
+          page.parent_page = self
+          return page
         end
-      end  
+        dirs.pop
+      end
+
+      if page = find_page_in_tree(map, name, '')
+        page.parent_page = self
+      end
+      page
     end
 
     def inspect
       %(#<#{self.class.name}:#{object_id} #{name} (#{format}) @wiki=#{@wiki.repo.path.inspect}>)
     end
-    
   end
 end

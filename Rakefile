@@ -9,11 +9,11 @@ require 'date'
 #############################################################################
 
 def name
-  "gollum-lib"
+  @name ||= Dir['*.gemspec'].first.split('.').first
 end
 
 def version
-  line = File.read("lib/gollum-lib/version.rb")[/^\s*VERSION\s*=\s*.*/]
+  line = File.read("lib/#{name}.rb")[/^\s*VERSION\s*=\s*.*/]
   line.match(/.*VERSION\s*=\s*['"](.*)['"]/)[1]
 end
 
@@ -27,13 +27,13 @@ def next_version
 end
 
 def bump_version
-  old_file = File.read("lib/gollum-lib/version.rb")
+  old_file = File.read("lib/#{name}.rb")
   old_version_line = old_file[/^\s*VERSION\s*=\s*.*/]
   new_version = next_version
   # replace first match of old version with new version
   old_file.sub!(old_version_line, "    VERSION = '#{new_version}'")
 
-  File.write("lib/gollum-lib/version.rb", old_file)
+  File.write("lib/#{name}.rb", old_file)
 
   new_version
 end
@@ -47,15 +47,11 @@ def rubyforge_project
 end
 
 def gemspec_file
-  "gemspec.rb"
+  "#{name}.gemspec"
 end
 
-def gemspecs
-  ["#{name}.gemspec", "#{name}_java.gemspec"]
-end
-
-def gem_files
-  ["#{name}-#{version}.gem", "#{name}-#{version}-java.gem"]
+def gem_file
+  "#{name}-#{version}.gem"
 end
 
 def replace_header(head, header_name)
@@ -128,7 +124,6 @@ task :release => :build do
   sh "git push origin master"
   sh "git push origin v#{version}"
   sh "gem push pkg/#{name}-#{version}.gem"
-  sh "gem push pkg/#{name}-#{version}-java.gem"
 end
 
 desc 'Publish to rubygems. Same as release'
@@ -137,22 +132,19 @@ task :publish => :release
 desc 'Build gem'
 task :build => :gemspec do
   sh "mkdir -p pkg"
-  gemspecs.each do |gemspec|
-    sh "gem build #{gemspec}"
-  end
-  gem_files.each do |gem_file|
-    sh "mv #{gem_file} pkg"
-  end
+  sh "gem build #{gemspec_file}"
+  sh "mv #{gem_file} pkg"
 end
 
 desc 'Update gemspec'
 task :gemspec => :validate do
   # read spec file and split out manifest section
   spec = File.read(gemspec_file)
-  head, _manifest, tail = spec.split("  # = MANIFEST =\n")
+  head, manifest, tail = spec.split("  # = MANIFEST =\n")
 
   # replace name version and date
   replace_header(head, :name)
+  replace_header(head, :version)
   replace_header(head, :date)
   #comment this out if your rubyforge_project has a different name
   replace_header(head, :rubyforge_project)
@@ -167,7 +159,7 @@ task :gemspec => :validate do
     join("\n")
 
   # piece file back together and write
-  manifest = "  s.files = %w(\n#{files}\n  )\n"
+  manifest = "  s.files = %w[\n#{files}\n  ]\n"
   spec = [head, manifest, tail].join("  # = MANIFEST =\n")
   File.open(gemspec_file, 'w') { |io| io.write(spec) }
   puts "Updated #{gemspec_file}"

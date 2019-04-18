@@ -194,7 +194,6 @@ module Gollum
     #                            Default: false
     #           :collapse_tree - Start with collapsed file view. Default: false
     #           :css           - Include the custom.css file from the repo.
-    #           :emoji         - Parse and interpret emoji tags (e.g. :heart:).
     #           :h1_title      - Concatenate all h1's on a page to form the
     #                            page title.
     #           :index_page    - The default page to retrieve or create if the
@@ -241,7 +240,6 @@ module Gollum
       @show_all             = options.fetch :show_all, false
       @collapse_tree        = options.fetch :collapse_tree, false
       @css                  = options.fetch :css, false
-      @emoji                = options.fetch :emoji, false
       @h1_title             = options.fetch :h1_title, false
       @index_page           = options.fetch :index_page, 'Home'
       @bar_side             = options.fetch :sidebar, :right
@@ -250,8 +248,7 @@ module Gollum
       @allow_uploads        = options.fetch :allow_uploads, false
       @per_page_uploads     = options.fetch :per_page_uploads, false
       @filter_chain         = options.fetch :filter_chain,
-                                            [:Metadata, :PlainText, :TOC, :RemoteCode, :Code, :Macro, :Emoji, :Sanitize, :WSD, :PlantUML, :Tags, :Render]
-      @filter_chain.delete(:Emoji) unless options.fetch :emoji, false
+                                            [:Metadata, :PlainText, :TOC, :RemoteCode, :Code, :Macro, :Sanitize, :WSD, :Tags, :Render]
     end
 
     # Public: check whether the wiki's git repo exists on the filesystem.
@@ -313,7 +310,7 @@ module Gollum
       name = @page_class.cname(name) + '.' + ext
       blob = OpenStruct.new(:name => name, :data => data, :is_symlink => false)
       page.populate(blob)
-      page.version = @access.commit(@ref)
+      page.version = @access.commit('master')
       page
     end
 
@@ -340,7 +337,6 @@ module Gollum
       # spaces must be dashes
       sanitized_name = name.gsub(' ', '-')
       sanitized_dir  = dir.gsub(' ', '-')
-      sanitized_dir  = ::File.join([@page_file_dir, sanitized_dir].compact)
 
       multi_commit = !!commit[:committer]
       committer    = multi_commit ? commit[:committer] : Committer.new(self, commit)
@@ -349,7 +345,7 @@ module Gollum
 
       committer.add_to_index(sanitized_dir, filename, format, data)
 
-      committer.after_commit do |index, _sha|
+      committer.after_commit do |index, sha|
         @access.refresh
         index.update_working_dir(sanitized_dir, filename, format)
       end
@@ -399,7 +395,7 @@ module Gollum
       committer.delete(page.path)
       committer.add_to_index(target_dir, target_name, page.format, page.raw_data)
 
-      committer.after_commit do |index, _sha|
+      committer.after_commit do |index, sha|
         @access.refresh
         index.update_working_dir(source_dir, source_name, page.format)
         index.update_working_dir(target_dir, target_name, page.format)
@@ -448,7 +444,7 @@ module Gollum
         committer.add_to_index(dir, filename, format, data)
       end
 
-      committer.after_commit do |index, _sha|
+      committer.after_commit do |index, sha|
         @access.refresh
         index.update_working_dir(dir, page.filename_stripped, page.format)
         index.update_working_dir(dir, filename, format)
@@ -480,49 +476,12 @@ module Gollum
 
       committer.delete(page.path)
 
-      committer.after_commit do |index, _sha|
+      committer.after_commit do |index, sha|
         dir = ::File.dirname(page.path)
         dir = '' if dir == '.'
 
         @access.refresh
         index.update_working_dir(dir, page.filename_stripped, page.format)
-      end
-
-      multi_commit ? committer : committer.commit
-    end
-
-    # Public: Delete a file.
-    #
-    # path   - The path to the file to delete
-    # commit - The commit Hash details:
-    #          :message   - The String commit message.
-    #          :name      - The String author full name.
-    #          :email     - The String email address.
-    #          :parent    - Optional Gollum::Git::Commit parent to this update.
-    #          :tree      - Optional String SHA of the tree to create the
-    #                       index from.
-    #          :committer - Optional Gollum::Committer instance.  If provided,
-    #                       assume that this operation is part of batch of
-    #                       updates and the commit happens later.
-    #
-    # Returns the String SHA1 of the newly written version, or the
-    # Gollum::Committer instance if this is part of a batch update.
-    def delete_file(path, commit)
-      dir      = ::File.dirname(path)
-      ext      = ::File.extname(path)
-      format   = ext.split('.').last || 'txt'
-      filename = ::File.basename(path, ext)
-
-      multi_commit = !!commit[:committer]
-      committer    = multi_commit ? commit[:committer] : Committer.new(self, commit)
-
-      committer.delete(path)
-
-      committer.after_commit do |index, _sha|
-        dir = '' if dir == '.'
-
-        @access.refresh
-        index.update_working_dir(dir, filename, format)
       end
 
       multi_commit ? committer : committer.commit
@@ -550,12 +509,12 @@ module Gollum
         sha2   = nil
       end
 
-      patch     = full_reverse_diff_for(page, sha1, sha2)
-      committer = Committer.new(self, commit)
-      parent    = committer.parents[0]
+      patch                    = full_reverse_diff_for(page, sha1, sha2)
+      committer                = Committer.new(self, commit)
+      parent                   = committer.parents[0]
       committer.options[:tree] = @repo.git.apply_patch(parent.sha, patch)
       return false unless committer.options[:tree]
-      committer.after_commit do |index, _sha|
+      committer.after_commit do |index, sha|
         @access.refresh
 
         files = []
@@ -564,11 +523,11 @@ module Gollum
         else
           # Grit::Diff can't parse reverse diffs.... yet
           patch.each_line do |line|
-            if line =~ %r(^diff --git b/.+? a/(.+)$)
-              path = Regexp.last_match[1]
+            if line =~ %r{^diff --git b/.+? a/(.+)$}
+              path = $1
               ext  = ::File.extname(path)
               name = ::File.basename(path, ext)
-              if (format = ::Gollum::Page.format_for(ext))
+              if format = ::Gollum::Page.format_for(ext)
                 files << [path, name, format]
               end
             end
@@ -684,10 +643,10 @@ module Gollum
     #
     # Returns an Array of Gollum::Git::Commit.
     def latest_changes(options={})
-      options[:max_count] = 10 unless options[:max_count]
+      max_count = options.fetch(:max_count, 10)      
       @repo.log(@ref, nil, options)
     end
-
+    
     # Public: Refreshes just the cached Git reference data.  This should
     # be called after every Gollum update.
     #
@@ -701,7 +660,7 @@ module Gollum
     #
     # Returns a Sanitize instance.
     def sanitizer
-      if (options = sanitization)
+      if options = sanitization
         @sanitizer ||= options.to_sanitize
       end
     end
@@ -711,7 +670,7 @@ module Gollum
     #
     # Returns a Sanitize instance.
     def history_sanitizer
-      if (options = history_sanitization)
+      if options = history_sanitization
         @history_sanitizer ||= options.to_sanitize
       end
     end
@@ -857,7 +816,7 @@ module Gollum
     #
     # Returns a flat Array of Gollum::Page instances.
     def tree_list(ref)
-      if (sha = @access.ref_to_sha(ref))
+      if sha = @access.ref_to_sha(ref)
         commit = @access.commit(sha)
         tree_map_for(sha).inject([]) do |list, entry|
           next list unless @page_class.valid_page_name?(entry.name)
@@ -874,7 +833,7 @@ module Gollum
     #
     # Returns a flat Array of Gollum::File instances.
     def file_list(ref)
-      if (sha = @access.ref_to_sha(ref))
+      if sha = @access.ref_to_sha(ref)
         commit = @access.commit(sha)
         tree_map_for(sha).inject([]) do |list, entry|
           next list if entry.name.start_with?('_')

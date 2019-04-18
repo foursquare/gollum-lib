@@ -42,9 +42,8 @@ module Gollum
       # If given a block, that block will be registered with GitHub::Markup to
       # render any matching pages
       def register(ext, name, options = {}, &block)
-        @formats[ext] = { :name => name,
-          :regexp => options.fetch(:regexp, Regexp.new(ext.to_s)),
-          :reverse_links => options.fetch(:reverse_links, false) }
+        regexp        = options[:regexp] || Regexp.new(ext.to_s)
+        @formats[ext] = { :name => name, :regexp => regexp }
       end
     end
 
@@ -83,10 +82,6 @@ module Gollum
       @to_xml_opts = { :save_with => Nokogiri::XML::Node::SaveOptions::DEFAULT_XHTML ^ 1, :indent => 0, :encoding => 'UTF-8' }
     end
 
-    def reverse_links?
-      self.class.formats[@format][:reverse_links]
-    end
-
     # Render data using default chain in the target format.
     #
     # data - the data to render
@@ -94,12 +89,12 @@ module Gollum
     # name - name using the extension of the format
     #
     # Returns the processed data
-    def render_default(data, format=:markdown, name='render_default.md')
+    def render_default data, format=:markdown, name='render_default.md'
       # set instance vars so we're able to render data without a wiki or page.
       @format = format
       @name   = name
 
-      chain = [:Metadata, :PlainText, :Emoji, :TOC, :RemoteCode, :Code, :Sanitize, :WSD, :Tags, :Render]
+      chain = [:Metadata, :PlainText, :TOC, :RemoteCode, :Code, :Sanitize, :WSD, :Tags, :Render]
 
       filter_chain = chain.map do |r|
         Gollum::Filter.const_get(r).new(self)

@@ -1,39 +1,35 @@
 # ~*~ encoding: utf-8 ~*~
 module Gollum
-  # FileView requires that:
-  #  - All files in root dir are processed first
-  #  - Then all the folders are sorted and processed
-
+=begin
+  FileView requires that:
+    - All files in root dir are processed first
+    - Then all the folders are sorted and processed
+=end
   class FileView
     # common use cases:
     # set pages to wiki.pages and show_all to false
     # set pages to wiki.pages + wiki.files and show_all to true
-    def initialize(pages, options = {})
+    def initialize pages, options = {}
       @pages    = pages
-      @wiki     = @pages.first ? @pages.first.wiki : nil
       @show_all = options[:show_all] || false
       @checked  = options[:collapse_tree] ? '' : "checked"
     end
 
-    def enclose_tree(string)
-      sanitize_html(%Q(<ol class="tree">\n) + string + %Q(</ol>))
+    def enclose_tree string
+      %Q(<ol class="tree">\n) + string + %Q(</ol>)
     end
 
-    def new_page(page)
+    def new_page page
       name = page.name
-      url, valid_page  = url_for_page page
-      %Q(  <li class="file"><a href="#{url}"><span class="icon"></span>#{name}</a>#{valid_page ? "" : delete_file(url, valid_page)}</li>)
+      url  = url_for_page page
+      %Q(  <li class="file"><a href="#{url}"><span class="icon"></span>#{name}</a></li>)
     end
 
-    def delete_file(url, valid_page)
-      %Q(<form method="POST" action="/deleteFile/#{url}" onsubmit="return confirm('Do you really want to delete the file #{url}?');"><button type="submit" name="delete" value="true"></button></form>)
-    end
-
-    def new_folder(folder_path)
+    def new_folder folder_path
       new_sub_folder folder_path
     end
 
-    def new_sub_folder(path)
+    def new_sub_folder path
       <<-HTML
       <li>
         <label>#{path}</label> <input type="checkbox" #{@checked} />
@@ -45,21 +41,19 @@ module Gollum
       "</ol></li>\n"
     end
 
-    def url_for_page(page)
+    def url_for_page page
       url = ''
-      valid_page_name = false
       if @show_all
         # Remove ext for valid pages.
         filename = page.filename
-        valid_page_name =  Page::valid_page_name?(filename)
-        filename = valid_page_name ? filename.chomp(::File.extname(filename)) : filename
+        filename = Page::valid_page_name?(filename) ? filename.chomp(::File.extname(filename)) : filename
 
         url = ::File.join(::File.dirname(page.path), filename)
       else
         url = ::File.join(::File.dirname(page.path), page.filename_stripped)
       end
       url = url[2..-1] if url[0, 2] == './'
-      return url, valid_page_name
+      url
     end
 
     def render_files
@@ -97,7 +91,7 @@ module Gollum
         </li>
         HTML
 
-        return enclose_tree(html)
+        return enclose_tree html
       end
 
       sorted_folders = []
@@ -127,8 +121,8 @@ module Gollum
       changed   = false
 
       # process rest of folders
-      (0...sorted_folders.size).each do |i|
-        page   = @pages[sorted_folders[i][1]]
+      (0...sorted_folders.size).each do |index|
+        page   = @pages[sorted_folders[index][1]]
         path   = page.path
         folder = ::File.dirname path
 
@@ -149,16 +143,13 @@ module Gollum
           end
         end
 
-        html += new_page page
+        html      += new_page page
         cwd_array = tmp_array
-        changed = false
+        changed   = false
       end
 
-      enclose_tree(html)
+      # return the completed html
+      enclose_tree html
     end # end render_files
-
-    def sanitize_html(data)
-      @wiki ? @wiki.sanitizer.clean(data) : data
-    end
   end # end FileView class
 end # end Gollum module

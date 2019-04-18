@@ -3,9 +3,8 @@
 require 'digest/md5'
 require 'digest/sha1'
 require 'ostruct'
-require 'pathname'
 
-DEFAULT_ADAPTER = RUBY_PLATFORM == 'java' ? 'rjgit_adapter' : 'grit_adapter'
+DEFAULT_ADAPTER = 'grit_adapter'
 
 if defined?(Gollum::GIT_ADAPTER)
   require "#{Gollum::GIT_ADAPTER.downcase}_adapter"
@@ -16,7 +15,6 @@ end
 # external
 require 'github/markup'
 require 'sanitize'
-require 'gemojione'
 
 # internal
 require File.expand_path('../gollum-lib/git_access', __FILE__)
@@ -39,6 +37,9 @@ require File.expand_path('../gollum-lib/filter', __FILE__)
 $KCODE = 'U' if RUBY_VERSION[0, 3] == '1.8'
 
 module Gollum
+  module Lib
+    VERSION = '4.0.2'
+  end
 
   def self.assets_path
     ::File.expand_path('gollum/frontend/public', ::File.dirname(__FILE__))
@@ -63,3 +64,4 @@ module Gollum
   class NoSuchPathError < StandardError; end
 
 end
+

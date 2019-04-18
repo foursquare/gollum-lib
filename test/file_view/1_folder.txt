@@ -1,10 +1,10 @@
 <ol class="tree">
   <li>
     <label>.</label>
-    <input type="checkbox" checked />
+    <input type="checkbox" />
     <ol>
       <li class="file">
-        <a href="folder0"><span class="icon"></span>folder0</a><form method="POST" action="/deleteFile/folder0" onsubmit="return confirm('Do you really want to delete the file folder0?');"><button type="submit" name="delete" value="true"></button></form>
+        <a href="folder0"><span class="icon"></span>folder0</a>
       </li>
     </ol>
   </li>
